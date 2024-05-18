@@ -1,0 +1,346 @@
+//vista
+//Notes
+
+ORIGINAL AUTHOR: DANIEL CHIN
+PURPOSE: DISPLAYS FORMATTED GLDETAIL INFORMATION WITH JOB COST
+
+2020-02-05	JS	FIRST VERSION: Copy of NSA0011
+2020-03-20	JS	Added SNOTES detail search field
+2020-04-28	JS	Add comments for the report
+2020-05-22	JS	Trim spaces for all segments
+2020-06-17	KI	Updated report name to NSA9800 (per GC/DC)
+2021-06-18	JS	Updated report to include job, category, and job type filters
+2021-08-25	JS	Updated report to include category tree code and description
+2022-08-11	RS	Updated report to include associated payables, charges, and checks
+2023-03-24  AN  Updated to match new EMR segments
+2023-08-01  CC  Updated report to include SubAccount
+2023-08-29	JS	Updated report to include Unposted transaction tab and distinct unposted Account
+
+//End Notes
+
+//Database
+//End Database
+
+//Title
+NSA - Transaction Lines With Job Cost (NSA9800)
+//end title
+
+//select header
+
+--Obtain the hmy of property, book, and tree to be converted to scode, bookname, and scode respectively so as to be placed in header
+select scode, saddr1 into #props from property where hmy in (#hprop#)
+select bookname into #bks from books where book in (#book#)
+select scode into #trees from accttree where hmy in (#tree#)
+
+declare @tmp varchar(max) = ''
+select @tmp = @tmp + ltrim(rtrim(scode)) + '^' from #props
+
+declare @tmp2 varchar(max) = ''
+select @tmp2 = @tmp2 + ltrim(rtrim(bookname)) + '^' from #bks
+
+declare @tmp3 varchar(max) = ''
+select @tmp3 = @tmp3 + ltrim(rtrim(scode)) + '^' from #trees
+
+--Obtain items to be listed in output header
+select 
+  '#dtFrom# to #dtTo#' period
+, (select SUBSTRING(@tmp, 0, LEN(@tmp))) props
+, (select SUBSTRING(@tmp2, 0, LEN(@tmp2))) book
+, (select SUBSTRING(@tmp3, 0, LEN(@tmp3))) tree
+
+//end select
+
+//select detail
+
+--Obtain matching records based on the hdetail
+select
+ ltrim(rtrim(p.scode)) propcode
+,ltrim(rtrim(p.saddr1)) propname
+,b.bookname book
+,cast(ltrim(rtrim(a.scode)) as int) acctcode
+,ltrim(rtrim(a.sdesc)) acctdesc
+,ltrim(rtrim(jt.scode)) jobtypecode
+,ltrim(rtrim(jt.sdesc)) jobtypedesc
+,ltrim(rtrim(j.scode)) jobcode
+,ltrim(rtrim(j.sbriefdesc)) jobdesc
+,ltrim(rtrim(c.scode)) catcode
+,ltrim(rtrim(c.sdesc)) catdesc
+,ltrim(rtrim(x.scode)) cattreecode
+,ltrim(rtrim(x.sdesc)) cattreedesc
+,gd.dtdate detaildate
+,gd.dtpost period
+,ltrim(rtrim(pe.ucode)) personcode
+,case when pe.sfirstname = '' then pe.ulastname when pe.sfirstname is NULL then pe.ulastname else pe.sfirstname + ' ' + pe.ulastname end persondesc
+,gd.snotes detaildesc
+,t.itype type
+,t.hparent2 batch
+,gd.htran htran
+,gd.hdetail hdetail
+,ltrim(rtrim(gd.strannum)) control
+,ltrim(rtrim(gd.sref)) ref
+,gd.damount amount
+,t.snotes trannotes
+,ltrim(rtrim(gd.ssegment1)) s1
+,ltrim(rtrim(gd.ssegment2)) s2
+,ltrim(rtrim(gd.ssegment3)) s3
+,ltrim(rtrim(gd.ssegment4)) s4
+,ltrim(rtrim(gd.ssegment5)) s5
+,ltrim(rtrim(gd.ssegment6)) s6
+,ltrim(rtrim(gd.ssegment7)) s7
+,ltrim(rtrim(gd.ssegment8)) s8
+,ltrim(rtrim(gd.ssegment9)) s9
+,ltrim(rtrim(gd.ssegment10)) s10
+,ltrim(rtrim(gd.ssegment11)) s11
+,ltrim(rtrim(gd.ssegment12)) s12
+
+--Segment descriptions
+,ltrim(rtrim(s1.saddr1)) s1desc
+,ltrim(rtrim(s2.saddr1)) s2desc
+,ltrim(rtrim(s3.saddr1)) s3desc
+,ltrim(rtrim(s4.saddr1)) s4desc
+--,ltrim(rtrim(s5.saddr1)) s5desc
+/*,ltrim(rtrim(s6.saddr1)) s6desc*/
+--,ltrim(rtrim(s7.ucode)) s7desc --updated to ucode to pull from employee table
+,ltrim(rtrim(s8.saddr1)) s8desc
+--,ltrim(rtrim(s9.divdesc)) s9desc
+--,ltrim(rtrim(fa.name)) s10desc
+,ltrim(rtrim(s12.subacctdesc)) s12desc
+
+
+
+--Pulls payable or receipt control number tied to check or charge
+,case when gd.itype = 2 or gd.itype = 7 then ltrim(rtrim(d.hinvorrec))
+    else NULL
+    end payablereceipt
+
+--Pulls check number tied to payable
+,case when gd.itype = 3 then ltrim(rtrim(t2.uref))
+    else NULL
+    end checknum
+	
+--Pulls  in check or charge control number tied to payable or receipt
+,case when gd.itype = 3 or gd.itype = 6 then ltrim(rtrim(d.hchkorchg))
+ 	else NULL
+    end checkcharge
+
+from gldetail gd
+left join books b on gd.ibook = b.book
+left join property p on p.hmy=gd.hprop
+left join acct a on a.hmy = gd.hacct
+left join detail d on d.hmy = gd.hdetail
+left join trans t2 on t2.hmy = d.hchkorchg --Pulls in related checks and charges
+left join job j on j.hmy = d.hjob
+left join jobtype jt on jt.hmy = j.ijobtype
+left join category c on c.hmy = d.hcateg
+left join trans t on t.hmy = gd.htran
+left join person pe on pe.hmy = gd.hperson
+
+/*Joins below are used to obtain the segment descriptions*/
+left join building s1 on s1.sbldgid = gd.ssegment1 and s1.hprop = p.hmy 
+left join property s2 on s2.scode = gd.ssegment2 
+left join property s3 on s3.scode = gd.ssegment3 
+left join property s4 on s4.scode = gd.ssegment4
+left join unit s5 on s5.scode = gd.ssegment5 and s5.hproperty = p.hmy
+--left join person s7 on gd.ssegment7 = s7.ucode
+left join property s8 on s8.scode = gd.ssegment8
+--left join acctbut_division s9 on gd.ssegment9 = s9.divisionid
+--left join (select rtrim(p.scode) + '-' + f.assetid scode from propbut_fa f join property p on p.hmy = f.hcode) z on gd.ssegment10=z.scode left join propbut_fa fa on fa.assetid = right(z.scode,5) and fa.hcode = p.hmy
+left join acctbut_subacct s12 on gd.ssegment12 = s12.subacctid
+
+
+--Join for category tree code and descriptions
+left join ( select cx.hAcct, cd.scode, cd.sdesc from CategoryTreeXref cx
+left join CategoryTreeDetail cd on cx.hdetail = cd.hmy
+left join CategoryTree ct on ct.hmy = cd.hTree
+where ct.hmy = case when '#hCategTree#' = '' then null
+else '#hCategTree#' end) x on x.hAcct = c.hmy
+
+where 1=1
+
+--Map Filter conditions
+#condition110# /*gd.ibook in (#book#)*/
+#condition120# /*p.hmy in (#hprop#)*/
+#condition125# /*j.hmy in (#hjob#)*/
+#condition130# /*gd.dtpost between '#dtFrom#' and '#dtTo#'*/
+#condition135# /*t.hparent2 between '#batch#' and '#to#'*/
+#condition136# /*t.hmy between '#htran#' and '#hto#'*/
+#condition140# /*t.itype in (#trantype#)*/
+#condition145# /*jt.hmy in (#jobtype#)*/
+#condition150# /*a.scode between (select a.scode from acct a where a.hmy = ('#acctfrom#')) and (select a.scode from acct a where a.hmy = ('#acctto#'))*/
+#condition161# /*c.scode between (select c.scode from category c where c.hmy = ('#categfrom#')) and (select c.scode from category c where c.hmy = ('#categto#'))*/
+#condition165# /*gd.hacct in (select hacct from accttreexref tx where tx.htree in (#tree#))*/
+#condition170# /*p.hmy in (  select p.hmy from attributexref ax join property p on p.hmy=ax.hfilerecord join attributevalue av on av.hmy=ax.hattributevalue where av.hmy = ('#attrib_conso1#')   )*/
+--#condition180# /*p.hmy in (  select p.hmy from attributexref ax join property p on p.hmy=ax.hfilerecord join attributevalue av on av.hmy=ax.hattributevalue where av.hmy = ('#attrib_conso2#')   )*/
+#condition190# /*gd.snotes like '%#detailnotes#%'*/
+#condition301# /*gd.ssegment1 in (select sbldgid from building where hmy = '#s1#') and p.hmy in (select hprop from building where hmy = '#s1#')*/
+#condition302# /*gd.ssegment2 in (select gd.ssegment2 from gldetail gd join property p on gd.ssegment2=p.scode where p.hmy in (#s2#))*/
+#condition303# /*gd.ssegment3 in (select gd.ssegment3 from gldetail gd join property p on gd.ssegment3=p.scode where p.hmy in (#s3#))*/
+#condition304# /*gd.ssegment4 in (select gd.ssegment4 from gldetail gd join property p on gd.ssegment4=p.scode where p.hmy in (#s4#))*/
+#condition305# /*gd.ssegment5 in (select scode from unit where hmy = '#s5#') and p.hmy in (select hproperty from unit where hmy = '#s5#')*/
+#condition306# /*gd.ssegment6 in (#s6#)*/
+--#condition307# 
+#condition308# /*gd.ssegment8 in (select gd.ssegment8 from gldetail gd join property p on gd.ssegment8=p.scode where p.hmy in (#s8#))*/
+--#condition309# 
+--#condition310# 
+#condition311# /*gd.ssegment11 in (#s11#)*/
+#condition312# /*gd.ssegment12 in (#s12#)*/
+
+
+order by gd.dtpost, p.scode, a.scode, gd.strannum
+
+//end select
+
+
+//select onboard
+
+-- for onboarding mapping support
+select distinct
+  ltrim(rtrim(p.scode)) propcode
+  ,ltrim(rtrim(p.saddr1)) propname
+  ,cast(ltrim(rtrim(a.scode)) as int) acctcode
+  ,ltrim(rtrim(a.sdesc)) acctdesc
+
+  ,ltrim(rtrim(gd.ssegment2)) s2
+  ,ltrim(rtrim(gd.ssegment4)) s4
+  ,ltrim(rtrim(gd.ssegment6)) s6
+  ,ltrim(rtrim(gd.ssegment12)) s12
+
+  --Segment descriptions
+  ,ltrim(rtrim(s2.saddr1)) s2desc
+  ,ltrim(rtrim(s4.saddr1)) s4desc
+  ,ltrim(rtrim(s12.subacctdesc)) s12desc
+
+from gldetail gd
+left join books b on gd.ibook = b.book
+left join property p on p.hmy=gd.hprop
+left join property s2 on s2.scode = gd.ssegment2 
+left join property s4 on s4.scode = gd.ssegment4
+left join acct a on a.hmy = gd.hacct
+left join detail d on d.hmy = gd.hdetail
+
+/*Joins below are used to obtain the segment descriptions*/
+inner join acctbut_subacct s12 on gd.ssegment12 = s12.subacctid
+
+where 1=1
+and a.scode != '39010800'
+
+--Map Filter conditions
+#condition110# /*gd.ibook in (#book#)*/
+#condition120# /*p.hmy in (#hprop#)*/
+#condition130# /*gd.dtpost between '#dtFrom#' and '#dtTo#'*/
+#condition150# /*a.scode between (select a.scode from acct a where a.hmy = ('#acctfrom#')) and (select a.scode from acct a where a.hmy = ('#acctto#'))*/
+#condition312# /*gd.ssegment12 in (#s12#)*/
+#condition302# /*gd.ssegment2 in (select gd.ssegment2 from gldetail gd join property p on gd.ssegment2=p.scode where p.hmy in (#s2#))*/
+
+order by acctcode asc
+
+//end select
+
+//select unposted
+
+select
+  d.hinvorrec detailId
+, t.itype postedUnposted
+
+, d.hprop propertyId
+, ltrim(rtrim(p.scode)) propcode
+, ltrim(rtrim(p.saddr1)) propname
+
+, d.hacct accountId
+, ltrim(rtrim(a.scode)) acctcode
+, ltrim(rtrim(a.sdesc)) acctdesc
+
+, d.hjob jobId
+, ltrim(rtrim(j.scode)) jobcode
+, ltrim(rtrim(j.sbriefdesc)) jobdesc
+, ltrim(rtrim(jt.scode)) jobtypecode
+, ltrim(rtrim(jt.sdesc)) jobtypedesc
+
+, d.hcateg categId
+, ltrim(rtrim(c.scode)) catcode
+, ltrim(rtrim(c.sdesc)) catdesc
+
+, d.hbank bankId
+, b.scode bankcode
+, b.sdesc bankdesc
+
+, t.upostdate postMonth
+, t.sotherdate1 transDate
+, d.samount amount
+, d.snotes notes
+
+,ltrim(rtrim(d.ssegment1)) s1
+,ltrim(rtrim(d.ssegment2)) s2
+,ltrim(rtrim(d.ssegment3)) s3
+,ltrim(rtrim(d.ssegment4)) s4
+,ltrim(rtrim(d.ssegment5)) s5
+,ltrim(rtrim(d.ssegment6)) s6
+,ltrim(rtrim(d.ssegment7)) s7
+,ltrim(rtrim(d.ssegment8)) s8
+,ltrim(rtrim(d.ssegment9)) s9
+,ltrim(rtrim(d.ssegment10)) s10
+,ltrim(rtrim(d.ssegment11)) s11
+,ltrim(rtrim(d.ssegment12)) s12
+
+--Segment descriptions
+,ltrim(rtrim(s1.saddr1)) s1desc
+,ltrim(rtrim(s2.saddr1)) s2desc
+,ltrim(rtrim(s3.saddr1)) s3desc
+,ltrim(rtrim(s4.saddr1)) s4desc
+,ltrim(rtrim(s8.saddr1)) s8desc
+,ltrim(rtrim(s12.subacctdesc)) s12desc
+
+from detail d
+left join trans t on t.hmy = d.hinvorrec
+left join property p on p.hmy = d.hprop
+left join acct a on a.hmy = d.hacct
+left join job j on j.hmy = d.hjob
+left join jobtype jt on jt.hmy = j.ijobtype
+left join category c on c.hmy = d.hcateg
+left join bankxref bx on bx.hacct = d.hacct and bx.hppty = d.hprop
+left join bank b on b.hmy = bx.hbaidx
+
+--Joins below are used to obtain the segment descriptions
+left join building s1 on s1.sbldgid = d.ssegment1 and s1.hprop = p.hmy 
+left join property s2 on s2.scode = d.ssegment2 
+left join property s3 on s3.scode = d.ssegment3 
+left join property s4 on s4.scode = d.ssegment4
+left join property s8 on s8.scode = d.ssegment8
+left join acctbut_subacct s12 on d.ssegment12 = s12.subacctid
+
+where 1 = 1
+and t.itype = 15
+and p.hmy in (#hprop#)
+and t.upostdate between '#dtFrom#' and '#dtTo#'
+
+//end select
+
+//select unpstact
+
+select distinct
+  d.hacct accountId
+, ltrim(rtrim(a.scode)) acctcode
+, ltrim(rtrim(a.sdesc)) acctdesc
+
+,ltrim(rtrim(d.ssegment2)) s2
+,ltrim(rtrim(d.ssegment12)) s12
+,ltrim(rtrim(s2.saddr1)) s2desc
+,ltrim(rtrim(s12.subacctdesc)) s12desc
+
+from detail d
+left join trans t on t.hmy = d.hinvorrec
+left join property p on p.hmy = d.hprop
+left join acct a on a.hmy = d.hacct
+
+--Joins below are used to obtain the segment descriptions
+left join acctbut_subacct s12 on d.ssegment12 = s12.subacctid
+left join property s2 on s2.scode = d.ssegment2 
+
+where 1 = 1
+and t.itype = 15
+and p.hmy in (#hprop#)
+and t.upostdate between '#dtFrom#' and '#dtTo#'
+
+order by acctcode, s12 asc
+
+//end select
